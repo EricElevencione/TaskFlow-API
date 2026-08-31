@@ -2,6 +2,7 @@ import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { prisma } from "./db.js";
 import * as z from "zod";
+import bcrypt from "bcrypt";
 
 const app = express();
 const PORT = 3000;
@@ -13,6 +14,11 @@ const taskSchema = z.object({
   completed: z.boolean("Completed must be true or false"),
 });
 
+const usersSchema = z.object({
+  email: z.string("Email must be existing"),
+  password: z.string("Password must be string"),
+});
+
 // Home route to prevent 'Cannot GET /'
 app.get("/", (req, res) => {
   res.send("Welcome to the TaskFlow API! Access tasks at /tasks");
@@ -22,6 +28,27 @@ app.get("/", (req, res) => {
 app.get("/tasks", async (req, res) => {
   const tasks = await prisma.task.findMany();
   res.send(tasks);
+});
+
+// POST for Users authentication
+app.post("/auth/signup", async (req, res) => {
+  const existingUser = usersSchema.safeParse(req.body);
+
+  if (!existingUser.success) {
+    return res
+      .status(400)
+      .send(existingUser.error.issues.map((issue) => issue.message).join(", "));
+  } else {
+    const { passwordHash, ...assignUser } = usersSchema;
+
+    const assignUser = await prisma.user.create({
+      data: {
+        email,
+        passwordHash,
+      },
+    });
+    res.send(assignUser);
+  }
 });
 
 // POST a new task dynamically
