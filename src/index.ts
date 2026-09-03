@@ -58,6 +58,40 @@ app.post("/auth/signup", async (req, res) => {
   }
 });
 
+// POST for Users Log in
+app.post("/auth/login", async (req, res) => {
+  const existingUser = usersSchema.safeParse(req.body);
+
+  if (!existingUser.success) {
+    return res
+      .status(400)
+      .send(existingUser.error.issues.map((issue) => issue.message).join(", "));
+  } else {
+    const email = existingUser.data.email;
+    const password = existingUser.data.password;
+    const findUser = await prisma.user.findUnique({
+      where: {
+        email,
+      },
+    });
+    if (findUser === null) {
+      return res.status(401).send("It doesn't exist the user");
+    } else {
+      bycrypt.compare(password, findUser.passwordHash, function (err, result) {
+        if (err) {
+          return res.status(401).send("Invalid email or password");
+        }
+        if (result) {
+          const { passwordHash, ...safeUser } = findUser;
+          res.send(safeUser);
+        } else {
+          return res.status(401).send("Invalid password");
+        }
+      });
+    }
+  }
+});
+
 // POST a new task dynamically
 app.post("/tasks", async (req, res) => {
   const result = taskSchema.safeParse(req.body);
