@@ -2,7 +2,7 @@ import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { prisma } from "./db.js";
 import * as z from "zod";
-import bcrypt from "bcrypt";
+import bycrypt from "bcrypt";
 
 const app = express();
 const PORT = 3000;
@@ -12,6 +12,7 @@ app.use(express.json());
 const taskSchema = z.object({
   title: z.string("Title must be a string"),
   completed: z.boolean("Completed must be true or false"),
+  userId: z.number("Must be number"),
 });
 
 const usersSchema = z.object({
@@ -24,9 +25,15 @@ app.get("/", (req, res) => {
   res.send("Welcome to the TaskFlow API! Access tasks at /tasks");
 });
 
+app.get("/auth/signup", async (req, res) => {
+  const users = await prisma.user.findMany();
+  res.send(users);
+});
+
 // GET all tasks
 app.get("/tasks", async (req, res) => {
   const tasks = await prisma.task.findMany();
+  const user = await prisma.user.findMany();
   res.send(tasks);
 });
 
@@ -39,15 +46,15 @@ app.post("/auth/signup", async (req, res) => {
       .status(400)
       .send(existingUser.error.issues.map((issue) => issue.message).join(", "));
   } else {
-    const { passwordHash, ...assignUser } = usersSchema;
-
+    const hash = await bycrypt.hash(req.body.password, 10);
     const assignUser = await prisma.user.create({
       data: {
-        email,
-        passwordHash,
+        email: req.body.email,
+        passwordHash: hash,
       },
     });
-    res.send(assignUser);
+    const { passwordHash, ...safeUser } = assignUser;
+    res.send(safeUser);
   }
 });
 
@@ -62,11 +69,13 @@ app.post("/tasks", async (req, res) => {
   } else {
     const title = result.data.title;
     const completed = result.data.completed;
+    const userId = result.data.userId;
 
     const assignTask = await prisma.task.create({
       data: {
         title,
         completed,
+        userId,
       },
     });
     res.send(assignTask);
@@ -94,24 +103,6 @@ app.get("/tasks/:id", async (req, res) => {
     }
   }
 });
-
-// const taskId = id.data;
-//     const taskIdExist =
-//       (await prisma.task.count({
-//         where: {
-//           id: taskId,
-//         },
-//       })) > 0;
-//     if (!taskIdExist) {
-//       return res.status(500).send("the ID don't exist in the database");
-//     } else {
-//       const task = await prisma.task.findUnique({
-//         where: {
-//           id: taskId,
-//         },
-//       });
-//       res.send(task);
-//     }
 
 app.put("/tasks/:id", async (req, res) => {
   const result = taskSchema.safeParse(req.body);
