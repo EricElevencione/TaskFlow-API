@@ -2,10 +2,11 @@ import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { prisma } from "./db.js";
 import * as z from "zod";
-import bycrypt from "bcrypt";
+import bcrypt from "bcrypt";
 
 const app = express();
 const PORT = 3000;
+const jwt = require("jsonwebtoken");
 
 app.use(express.json());
 
@@ -46,10 +47,10 @@ app.post("/auth/signup", async (req, res) => {
       .status(400)
       .send(existingUser.error.issues.map((issue) => issue.message).join(", "));
   } else {
-    const hash = await bycrypt.hash(req.body.password, 10);
+    const hash = await bcrypt.hash(req.body.password, 10);
     const assignUser = await prisma.user.create({
       data: {
-        email: req.body.email,
+        email: existingUser.data.email,
         passwordHash: hash,
       },
     });
@@ -75,20 +76,19 @@ app.post("/auth/login", async (req, res) => {
       },
     });
     if (findUser === null) {
-      return res.status(401).send("It doesn't exist the user");
-    } else {
-      bycrypt.compare(password, findUser.passwordHash, function (err, result) {
-        if (err) {
-          return res.status(401).send("Invalid email or password");
-        }
-        if (result) {
-          const { passwordHash, ...safeUser } = findUser;
-          res.send(safeUser);
-        } else {
-          return res.status(401).send("Invalid password");
-        }
-      });
+      return res.status(401).send("User not found");
     }
+    const passwordCorrect = await bcrypt.compare(
+      password,
+      findUser.passwordHash,
+    );
+    if (!passwordCorrect) {
+      return res.status(401).send("Invalid email or password");
+    }
+
+    const { passwordHash, ...safeUser } = findUser;
+    jwt.sign(findUser.id, passwordHash);
+    res.send(safeUser);
   }
 });
 
