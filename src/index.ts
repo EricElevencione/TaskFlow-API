@@ -3,10 +3,13 @@ import type { Request, Response, NextFunction } from "express";
 import { prisma } from "./db.js";
 import * as z from "zod";
 import bcrypt from "bcrypt";
+import "dotenv/config";
+import jwt from "jsonwebtoken";
+
+const jwtSecret = process.env.JWT_SECRET;
 
 const app = express();
 const PORT = 3000;
-const jwt = require("jsonwebtoken");
 
 app.use(express.json());
 
@@ -46,8 +49,17 @@ app.post("/auth/signup", async (req, res) => {
     return res
       .status(400)
       .send(existingUser.error.issues.map((issue) => issue.message).join(", "));
+  }
+  const email = existingUser.data.email;
+  const userEmail = await prisma.user.findUnique({
+    where: {
+      email,
+    },
+  });
+  if (userEmail !== null) {
+    return res.status(409).send("Email is already registered");
   } else {
-    const hash = await bcrypt.hash(req.body.password, 10);
+    const hash = await bcrypt.hash(existingUser.data.password, 10);
     const assignUser = await prisma.user.create({
       data: {
         email: existingUser.data.email,
@@ -85,10 +97,20 @@ app.post("/auth/login", async (req, res) => {
     if (!passwordCorrect) {
       return res.status(401).send("Invalid email or password");
     }
+    if (jwtSecret == null) {
+      return res.status(401).send("JWT secret is not configured");
+    }
 
+    // Separate hash and safeUser to remove avoid sending the password as token
     const { passwordHash, ...safeUser } = findUser;
-    jwt.sign(findUser.id, passwordHash);
-    res.send(safeUser);
+    // I can use the String(findUser.id) but not recommended
+    const accessToken = jwt.sign({ userId: findUser.id }, jwtSecret);
+    // Send user + access token in one response to avoid "Cannot set headers after they are sent"
+    res.json({
+      message: "Login successful!",
+      user: safeUser,
+      token: accessToken,
+    });
   }
 });
 
