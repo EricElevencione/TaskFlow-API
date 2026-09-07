@@ -13,35 +13,86 @@ const PORT = 3000;
 
 app.use(express.json());
 
+// Verify the JWT and attach the authenticated user's ID
+// to the request so protected routes can identify the user.
+const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    return res.status(401).send("No token provided");
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  if (token === undefined) {
+    return res.status(401).send("Token is undefined");
+  }
+
+  if (jwtSecret == null) {
+    return res.status(500).send("JWT secret is not configured");
+  }
+
+  const decoded = jwt.verify(token, jwtSecret);
+
+  const userId = (decoded as { userId: number }).userId;
+
+  req.userId = userId;
+
+  next();
+};
+
+// Zod validation for incoming data
 const taskSchema = z.object({
   title: z.string("Title must be a string"),
   completed: z.boolean("Completed must be true or false"),
-  userId: z.number("Must be number"),
 });
-
+// Zod validation for incoming data
 const usersSchema = z.object({
-  email: z.string("Email must be existing"),
-  password: z.string("Password must be string"),
+  email: z.email("Invalid email format"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
 });
 
-// Home route to prevent 'Cannot GET /'
+// Home route to prevent 'Cannot GET /'. Just display of it
 app.get("/", (req, res) => {
   res.send("Welcome to the TaskFlow API! Access tasks at /tasks");
 });
 
-app.get("/auth/signup", async (req, res) => {
-  const users = await prisma.user.findMany();
-  res.send(users);
+// Get the currently authenticated user from the existing token
+app.get("/auth/me", async (req, res) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    return res.status(401).send("No token provided");
+  }
+  const token = authHeader.split(" ")[1];
+
+  if (token === undefined) {
+    return res.status(401).send("Token is undefined");
+  }
+  if (jwtSecret == null) {
+    return res.status(500).send("JWT secret is not configured");
+  }
+
+  const decoded = jwt.verify(token, jwtSecret);
+
+  const userId = (decoded as { userId: number }).userId;
+
+  const user = await prisma.user.findUnique({
+    where: {
+      id: userId,
+    },
+  });
+
+  if (user === null) {
+    return res.status(404).send("User not found");
+  }
+
+  const { passwordHash, ...safeUser } = user;
+
+  res.send(safeUser);
 });
 
-// GET all tasks
-app.get("/tasks", async (req, res) => {
-  const tasks = await prisma.task.findMany();
-  const user = await prisma.user.findMany();
-  res.send(tasks);
-});
-
-// POST for Users authentication
+// Sign up user for log in later
 app.post("/auth/signup", async (req, res) => {
   const existingUser = usersSchema.safeParse(req.body);
 
@@ -51,12 +102,12 @@ app.post("/auth/signup", async (req, res) => {
       .send(existingUser.error.issues.map((issue) => issue.message).join(", "));
   }
   const email = existingUser.data.email;
-  const userEmail = await prisma.user.findUnique({
+  const user = await prisma.user.findUnique({
     where: {
       email,
     },
   });
-  if (userEmail !== null) {
+  if (user !== null) {
     return res.status(409).send("Email is already registered");
   } else {
     const hash = await bcrypt.hash(existingUser.data.password, 10);
@@ -71,7 +122,7 @@ app.post("/auth/signup", async (req, res) => {
   }
 });
 
-// POST for Users Log in
+// User Log in and gives a token that is temporarily
 app.post("/auth/login", async (req, res) => {
   const existingUser = usersSchema.safeParse(req.body);
 
@@ -88,7 +139,7 @@ app.post("/auth/login", async (req, res) => {
       },
     });
     if (findUser === null) {
-      return res.status(401).send("User not found");
+      return res.status(401).send("Invalid email or password");
     }
     const passwordCorrect = await bcrypt.compare(
       password,
@@ -104,7 +155,9 @@ app.post("/auth/login", async (req, res) => {
     // Separate hash and safeUser to remove avoid sending the password as token
     const { passwordHash, ...safeUser } = findUser;
     // I can use the String(findUser.id) but not recommended
-    const accessToken = jwt.sign({ userId: findUser.id }, jwtSecret);
+    const accessToken = jwt.sign({ userId: findUser.id }, jwtSecret, {
+      expiresIn: "1h",
+    });
     // Send user + access token in one response to avoid "Cannot set headers after they are sent"
     res.json({
       message: "Login successful!",
@@ -114,8 +167,18 @@ app.post("/auth/login", async (req, res) => {
   }
 });
 
-// POST a new task dynamically
-app.post("/tasks", async (req, res) => {
+// Get all of the task
+app.get("/tasks", authMiddleware, async (req, res) => {
+  const tasks = await prisma.task.findMany({
+    where: {
+      userId: req.userId,
+    },
+  });
+  res.send(tasks);
+});
+
+// Create a new task and assign it to the authenticated user
+app.post("/tasks", authMiddleware, async (req, res) => {
   const result = taskSchema.safeParse(req.body);
 
   if (!result.success) {
@@ -125,22 +188,20 @@ app.post("/tasks", async (req, res) => {
   } else {
     const title = result.data.title;
     const completed = result.data.completed;
-    const userId = result.data.userId;
 
     const assignTask = await prisma.task.create({
       data: {
         title,
         completed,
-        userId,
+        userId: req.userId,
       },
     });
     res.send(assignTask);
   }
 });
 
-// Getting a specific task
-app.get("/tasks/:id", async (req, res) => {
-  // const id = Number(req.params.id);
+// Get a task by its ID
+app.get("/tasks/:id", authMiddleware, async (req, res) => {
   const id = z.coerce.number().safeParse(req.params.id);
 
   if (!id.success) {
@@ -160,7 +221,8 @@ app.get("/tasks/:id", async (req, res) => {
   }
 });
 
-app.put("/tasks/:id", async (req, res) => {
+// Update an existing task
+app.put("/tasks/:id", authMiddleware, async (req, res) => {
   const result = taskSchema.safeParse(req.body);
   const id = z.coerce.number().safeParse(req.params.id);
 
@@ -196,8 +258,8 @@ app.put("/tasks/:id", async (req, res) => {
   }
 });
 
-app.delete("/tasks/:id", async (req, res) => {
-  // const id = Number(req.params.id);
+// Delete an existing task by its ID
+app.delete("/tasks/:id", authMiddleware, async (req, res) => {
   const id = z.coerce.number().safeParse(req.params.id);
 
   if (!id.success) {
@@ -220,23 +282,6 @@ app.delete("/tasks/:id", async (req, res) => {
       res.send(deleteTask);
     }
   }
-
-  // const task = await prisma.task.findUnique({
-  //   where: {
-  //     id,
-  //   },
-  // });
-
-  // if (!task) {
-  //   return res.status(404).send("Task not found");
-  // } else {
-  //   const deleteTask = await prisma.task.delete({
-  //     where: {
-  //       id,
-  //     },
-  //   });
-  //   res.send(deleteTask);
-  // }
 });
 
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
