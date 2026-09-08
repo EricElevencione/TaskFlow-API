@@ -32,13 +32,17 @@ const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
     return res.status(500).send("JWT secret is not configured");
   }
 
-  const decoded = jwt.verify(token, jwtSecret);
+  try {
+    const decoded = jwt.verify(token, jwtSecret);
 
-  const userId = (decoded as { userId: number }).userId;
+    const userId = (decoded as { userId: number }).userId;
 
-  req.userId = userId;
+    req.userId = userId;
 
-  next();
+    next();
+  } catch (error) {
+    return res.status(401).send("Invalid token");
+  }
 };
 
 // Zod validation for incoming data
@@ -55,41 +59,6 @@ const usersSchema = z.object({
 // Home route to prevent 'Cannot GET /'. Just display of it
 app.get("/", (req, res) => {
   res.send("Welcome to the TaskFlow API! Access tasks at /tasks");
-});
-
-// Get the currently authenticated user from the existing token
-app.get("/auth/me", async (req, res) => {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader) {
-    return res.status(401).send("No token provided");
-  }
-  const token = authHeader.split(" ")[1];
-
-  if (token === undefined) {
-    return res.status(401).send("Token is undefined");
-  }
-  if (jwtSecret == null) {
-    return res.status(500).send("JWT secret is not configured");
-  }
-
-  const decoded = jwt.verify(token, jwtSecret);
-
-  const userId = (decoded as { userId: number }).userId;
-
-  const user = await prisma.user.findUnique({
-    where: {
-      id: userId,
-    },
-  });
-
-  if (user === null) {
-    return res.status(404).send("User not found");
-  }
-
-  const { passwordHash, ...safeUser } = user;
-
-  res.send(safeUser);
 });
 
 // Sign up user for log in later
@@ -177,6 +146,31 @@ app.get("/tasks", authMiddleware, async (req, res) => {
   res.send(tasks);
 });
 
+// Get a task by its ID
+app.get("/tasks/:id", authMiddleware, async (req, res) => {
+  const id = z.coerce.number().safeParse(req.params.id);
+
+  if (!id.success) {
+    return res.status(400).send(id.error.issues.map((issue) => issue.message));
+  } else {
+    const taskId = id.data;
+    const task = await prisma.task.findUnique({
+      where: {
+        id: taskId,
+      },
+    });
+    if (task === null) {
+      return res.status(404).send("Task not found");
+    } else if (task.userId !== req.userId) {
+      return res
+        .status(403)
+        .send("You do not have permission to get this task");
+    } else {
+      res.send(task);
+    }
+  }
+});
+
 // Create a new task and assign it to the authenticated user
 app.post("/tasks", authMiddleware, async (req, res) => {
   const result = taskSchema.safeParse(req.body);
@@ -200,27 +194,6 @@ app.post("/tasks", authMiddleware, async (req, res) => {
   }
 });
 
-// Get a task by its ID
-app.get("/tasks/:id", authMiddleware, async (req, res) => {
-  const id = z.coerce.number().safeParse(req.params.id);
-
-  if (!id.success) {
-    return res.status(400).send(id.error.issues.map((issue) => issue.message));
-  } else {
-    const taskId = id.data;
-    const task = await prisma.task.findUnique({
-      where: {
-        id: taskId,
-      },
-    });
-    if (task === null) {
-      return res.status(404).send("Task not found");
-    } else {
-      res.send(task);
-    }
-  }
-});
-
 // Update an existing task
 app.put("/tasks/:id", authMiddleware, async (req, res) => {
   const result = taskSchema.safeParse(req.body);
@@ -241,6 +214,10 @@ app.put("/tasks/:id", authMiddleware, async (req, res) => {
     });
     if (task === null) {
       return res.status(404).send("Task not found");
+    } else if (task.userId !== req.userId) {
+      return res
+        .status(403)
+        .send("You do not have permission to update this task");
     } else {
       const title = result.data.title;
       const completed = result.data.completed;
@@ -273,6 +250,10 @@ app.delete("/tasks/:id", authMiddleware, async (req, res) => {
     });
     if (task === null) {
       return res.status(404).send("Task not found");
+    } else if (task.userId !== req.userId) {
+      return res
+        .status(403)
+        .send("You do not have permission to delete this task");
     } else {
       const deleteTask = await prisma.task.delete({
         where: {
