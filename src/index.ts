@@ -5,6 +5,7 @@ import * as z from "zod";
 import bcrypt from "bcrypt";
 import "dotenv/config";
 import jwt from "jsonwebtoken";
+import { title } from "node:process";
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -54,6 +55,11 @@ const taskSchema = z.object({
 const usersSchema = z.object({
   email: z.email("Invalid email format"),
   password: z.string().min(8, "Password must be at least 8 characters"),
+});
+
+const postsSchema = z.object({
+  title: z.string("Title must be a string"),
+  body: z.string("Title must be a string"),
 });
 
 // Home route to prevent 'Cannot GET /'. Just display of it
@@ -264,6 +270,20 @@ app.delete("/tasks/:id", authMiddleware, async (req, res) => {
     }
   }
 });
+
+app.get("/posts", authMiddleware, async (req, res) => {
+  const page = Number(req.query.page ?? 1);
+  const limit = Number(req.query.limit ?? 10);
+  const skip = (page - 1) * limit;
+
+  const posts = await prisma.post.findMany({
+    skip: skip,
+    take: limit,
+  });
+  res.send(posts);
+});
+
+app.post("/posts/:id/comments", authMiddleware, async (req, res) => {});
 
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   res.status(500).send(err.message);
