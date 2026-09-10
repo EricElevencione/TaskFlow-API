@@ -9,7 +9,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 model Task {
@@ -27,4 +27,31 @@ model User {
   passwordHash String 
   createdAt DateTime @default(now())
   tasks Task[]
+  post Post[]
+  comment Comment[]
+}
+
+model Post {
+  id        Int      @id @default(autoincrement())
+  title     String 
+  body      String  
+  authorId  Int
+  author User @relation(fields: [authorId], references: [id])
+  comment Comment[]
+  tags      Tag[]  
+}
+
+model Comment {
+  id        Int      @id @default(autoincrement())
+  body      String  
+  authorId  Int
+  postId Int
+  author User @relation(fields: [authorId], references: [id])
+  post Post @relation(fields: [postId], references: [id])
+}
+
+model Tag {
+  id    Int    @id @default(autoincrement())
+  name  String @unique
+  posts Post[]
 }
