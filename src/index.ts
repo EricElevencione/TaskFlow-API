@@ -5,7 +5,6 @@ import * as z from "zod";
 import bcrypt from "bcrypt";
 import "dotenv/config";
 import jwt from "jsonwebtoken";
-import { title } from "node:process";
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -59,7 +58,7 @@ const usersSchema = z.object({
 
 const postsSchema = z.object({
   title: z.string("Title must be a string"),
-  body: z.string("Title must be a string"),
+  body: z.string("Body must be a string"),
 });
 
 // Home route to prevent 'Cannot GET /'. Just display of it
@@ -283,6 +282,28 @@ app.get("/posts", authMiddleware, async (req, res) => {
   res.send(posts);
 });
 
+app.post("/posts", authMiddleware, async (req, res) => {
+  const post = postsSchema.safeParse(req.body);
+
+  if (!post.success) {
+    return res
+      .status(400)
+      .send(post.error.issues.map((issue) => issue.message));
+  } else {
+    const title = post.data.title;
+    const body = post.data.body;
+    const posts = await prisma.post.create({
+      data: {
+        title,
+        body,
+        authorId: req.userId,
+      },
+    });
+    res.send(posts);
+  }
+});
+
+app.get("/posts/:id/comments", authMiddleware, async (req, res) => {});
 app.post("/posts/:id/comments", authMiddleware, async (req, res) => {});
 
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
