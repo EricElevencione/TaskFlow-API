@@ -61,6 +61,10 @@ const postsSchema = z.object({
   body: z.string("Body must be a string"),
 });
 
+const commentsSchema = z.object({
+  body: z.string("Body must be a string"),
+});
+
 // Home route to prevent 'Cannot GET /'. Just display of it
 app.get("/", (req, res) => {
   res.send("Welcome to the TaskFlow API! Access tasks at /tasks");
@@ -303,8 +307,41 @@ app.post("/posts", authMiddleware, async (req, res) => {
   }
 });
 
-app.get("/posts/:id/comments", authMiddleware, async (req, res) => {});
-app.post("/posts/:id/comments", authMiddleware, async (req, res) => {});
+app.get("/posts/:postId/comments", authMiddleware, async (req, res) => {
+  const postId = Number(req.params.postId);
+
+  if (Number.isNaN(postId)) {
+    return res.status(400).send("Invalid post id");
+  } else {
+    const comments = await prisma.comment.findMany({
+      where: {
+        postId,
+      },
+    });
+    res.send(comments);
+  }
+});
+
+app.post("/posts/:postId/comments", authMiddleware, async (req, res) => {
+  const comment = commentsSchema.safeParse(req.body);
+  const postId = Number(req.params.postId);
+
+  if (!comment.success) {
+    return res.status(400).send("Comment must be string");
+  } else if (Number.isNaN(postId)) {
+    return res.status(400).send("Invalid post id");
+  } else {
+    const body = comment.data.body;
+    const comments = await prisma.comment.create({
+      data: {
+        body,
+        authorId: req.userId,
+        postId: postId,
+      },
+    });
+    res.send(comments);
+  }
+});
 
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   res.status(500).send(err.message);
