@@ -313,12 +313,25 @@ app.get("/posts/:postId/comments", authMiddleware, async (req, res) => {
   if (Number.isNaN(postId)) {
     return res.status(400).send("Invalid post id");
   } else {
-    const comments = await prisma.comment.findMany({
+    const post = await prisma.post.findUnique({
       where: {
-        postId,
+        id: postId,
       },
     });
-    res.send(comments);
+    if (post === null) {
+      return res.status(404).send("The post doesn't exist");
+    } else {
+      const comments = await prisma.comment.findMany({
+        where: {
+          postId,
+        },
+      });
+      if (comments.length === 0) {
+        return res.status(404).send("This post has no comments yet");
+      } else {
+        res.send(comments);
+      }
+    }
   }
 });
 
@@ -327,19 +340,31 @@ app.post("/posts/:postId/comments", authMiddleware, async (req, res) => {
   const postId = Number(req.params.postId);
 
   if (!comment.success) {
-    return res.status(400).send("Comment must be string");
+    return res
+      .status(400)
+      .send(comment.error.issues.map((issue) => issue.message));
   } else if (Number.isNaN(postId)) {
     return res.status(400).send("Invalid post id");
   } else {
-    const body = comment.data.body;
-    const comments = await prisma.comment.create({
-      data: {
-        body,
-        authorId: req.userId,
-        postId: postId,
+    const commentId = await prisma.comment.findUnique({
+      where: {
+        id: postId,
       },
     });
-    res.send(comments);
+
+    if (commentId === null) {
+      return res.status(404).send("The post doesn't exist");
+    } else {
+      const body = comment.data.body;
+      const comments = await prisma.comment.create({
+        data: {
+          body,
+          authorId: req.userId,
+          postId: postId,
+        },
+      });
+      res.send(comments);
+    }
   }
 });
 
