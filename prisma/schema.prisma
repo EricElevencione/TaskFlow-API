@@ -36,6 +36,7 @@ model Post {
   title     String 
   body      String  
   authorId  Int
+  createdAt DateTime @default(now())
   author User @relation(fields: [authorId], references: [id])
   comment Comment[]
   tags      Tag[]  

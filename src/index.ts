@@ -278,12 +278,37 @@ app.get("/posts", authMiddleware, async (req, res) => {
   const page = Number(req.query.page ?? 1);
   const limit = Number(req.query.limit ?? 10);
   const skip = (page - 1) * limit;
+  const sortBy = req.query.sortBy;
+  const allowedSortFields = ["title", "createdAt"];
 
-  const posts = await prisma.post.findMany({
-    skip: skip,
-    take: limit,
-  });
-  res.send(posts);
+  if (sortBy !== undefined) {
+    if (typeof sortBy !== "string") {
+      return res.status(400).send("sortBy must be a string");
+    } else if (!allowedSortFields.includes(sortBy)) {
+      return res.status(400).send("Must be title or createdAt only");
+    } else {
+      let sortCriteria: object = {};
+
+      if (sortBy === "title") {
+        sortCriteria = { title: "desc" };
+      } else if (sortBy === "createdAt") {
+        sortCriteria = { createdAt: "asc" };
+      }
+
+      const posts = await prisma.post.findMany({
+        skip: skip,
+        take: limit,
+        orderBy: sortCriteria,
+      });
+      res.send(posts);
+    }
+  } else {
+    const posts = await prisma.post.findMany({
+      skip: skip,
+      take: limit,
+    });
+    res.send(posts);
+  }
 });
 
 app.post("/posts", authMiddleware, async (req, res) => {
@@ -326,11 +351,7 @@ app.get("/posts/:postId/comments", authMiddleware, async (req, res) => {
           postId,
         },
       });
-      if (comments.length === 0) {
-        return res.status(404).send("This post has no comments yet");
-      } else {
-        res.send(comments);
-      }
+      res.send(comments);
     }
   }
 });
