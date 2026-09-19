@@ -5,6 +5,7 @@ import * as z from "zod";
 import bcrypt from "bcrypt";
 import "dotenv/config";
 import jwt from "jsonwebtoken";
+import { Prisma } from "./generated/prisma/client.js";
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -57,7 +58,7 @@ const usersSchema = z.object({
 });
 
 const postsSchema = z.object({
-  title: z.string("Title must be a string"),
+  title: z.string().min(1, "Title is required"),
   body: z.string("Body must be a string"),
 });
 
@@ -279,36 +280,37 @@ app.get("/posts", authMiddleware, async (req, res) => {
   const limit = Number(req.query.limit ?? 10);
   const skip = (page - 1) * limit;
   const sortBy = req.query.sortBy;
+  const order = req.query.order;
   const allowedSortFields = ["title", "createdAt"];
+  const allowedOrderFields = ["asc", "desc"];
+  let orderBy: Prisma.PostOrderByWithRelationInput = {
+    createdAt: "desc",
+  };
 
-  if (sortBy !== undefined) {
-    if (typeof sortBy !== "string") {
-      return res.status(400).send("sortBy must be a string");
-    } else if (!allowedSortFields.includes(sortBy)) {
-      return res.status(400).send("Must be title or createdAt only");
+  if (
+    (sortBy !== undefined && order === undefined) ||
+    (sortBy === undefined && order !== undefined)
+  ) {
+    return res.status(400).send("Must provide sortBy and order");
+  } else if (sortBy !== undefined && order !== undefined) {
+    if (typeof sortBy !== "string" || typeof order !== "string") {
+      return res.status(400).send("sortBy and order must be a string");
+    } else if (
+      !allowedSortFields.includes(sortBy) ||
+      !allowedOrderFields.includes(order)
+    ) {
+      return res.status(400).send("Must have order and sortBy");
     } else {
-      let sortCriteria: object = {};
-
-      if (sortBy === "title") {
-        sortCriteria = { title: "desc" };
-      } else if (sortBy === "createdAt") {
-        sortCriteria = { createdAt: "asc" };
-      }
-
-      const posts = await prisma.post.findMany({
-        skip: skip,
-        take: limit,
-        orderBy: sortCriteria,
-      });
-      res.send(posts);
+      orderBy = { [sortBy]: order };
     }
-  } else {
-    const posts = await prisma.post.findMany({
-      skip: skip,
-      take: limit,
-    });
-    res.send(posts);
   }
+
+  const posts = await prisma.post.findMany({
+    skip: skip,
+    take: limit,
+    orderBy,
+  });
+  res.send(posts);
 });
 
 app.post("/posts", authMiddleware, async (req, res) => {
