@@ -66,6 +66,10 @@ const commentsSchema = z.object({
   body: z.string("Body must be a string"),
 });
 
+const tagsSchema = z.object({
+  tags: z.array(z.string()).default([]),
+});
+
 // Home route to prevent 'Cannot GET /'. Just display of it
 app.get("/", (req, res) => {
   res.send("Welcome to the TaskFlow API! Access tasks at /tasks");
@@ -281,11 +285,32 @@ app.get("/posts", authMiddleware, async (req, res) => {
   const skip = (page - 1) * limit;
   const sortBy = req.query.sortBy;
   const order = req.query.order;
+  const tag = req.query.tag;
   const allowedSortFields = ["title", "createdAt"];
   const allowedOrderFields = ["asc", "desc"];
+  // Set the default sorting to newest posts first, while allowing orderBy to use any valid Post sorting field
   let orderBy: Prisma.PostOrderByWithRelationInput = {
     createdAt: "desc",
   };
+
+  // Not optimal path if tag is undefined
+  // if (tag === undefined) {
+  //   return;
+  // }
+
+  // If tag is declared find the individual tag (more like validation)
+  if (tag !== undefined && typeof tag !== "string") {
+    return res.status(400).send("Tag must be a string");
+  } else if (typeof tag === "string") {
+    const existingTag = await prisma.tag.findUnique({
+      where: {
+        name: tag,
+      },
+    });
+    if (existingTag === null) {
+      return res.status(400).send("Tag not found");
+    }
+  }
 
   if (
     (sortBy !== undefined && order === undefined) ||
@@ -301,33 +326,78 @@ app.get("/posts", authMiddleware, async (req, res) => {
     ) {
       return res.status(400).send("Must have order and sortBy");
     } else {
+      // Change its orderBy to what the request is
       orderBy = { [sortBy]: order };
     }
   }
 
+  // // Currently have no filters
+  let where: Prisma.PostWhereInput = {};
+
+  // // Validation and put some in where variable
+  if (typeof tag === "string") {
+    where = {
+      tags: {
+        some: {
+          name: tag,
+        },
+      },
+    };
+  }
+
+  // Put into default if not "sortBy" or "order" with "where" is default if user doesn't provide
   const posts = await prisma.post.findMany({
     skip: skip,
     take: limit,
     orderBy,
+    where,
+
+    // Errors because the some or tag is will be undefined if the user puts this "GET /posts"
+    // where: {
+    //   tags: {
+    //     some: {
+    //       name: tag,
+    //     },
+    //   },
+    // },
   });
   res.send(posts);
 });
 
 app.post("/posts", authMiddleware, async (req, res) => {
   const post = postsSchema.safeParse(req.body);
+  const tags = tagsSchema.safeParse(req.body);
 
   if (!post.success) {
     return res
       .status(400)
       .send(post.error.issues.map((issue) => issue.message));
+  } else if (!tags.success) {
+    return res
+      .status(400)
+      .send(tags.error.issues.map((issue) => issue.message));
   } else {
     const title = post.data.title;
     const body = post.data.body;
+    const tag = tags.data.tags;
     const posts = await prisma.post.create({
       data: {
         title,
         body,
         authorId: req.userId,
+        tags: {
+          connectOrCreate: tag.map((tagName) => ({
+            where: {
+              name: tagName,
+            },
+            create: {
+              name: tagName,
+            },
+          })),
+        },
+      },
+      include: {
+        tags: true,
       },
     });
     res.send(posts);
