@@ -25,6 +25,7 @@ model User {
   id       Int      @id @default(autoincrement()) 
   email    String   @unique 
   passwordHash String 
+  role         Role     @default(USER)
   createdAt DateTime @default(now())
   tasks Task[]
   post Post[]
@@ -55,4 +56,9 @@ model Tag {
   id    Int    @id @default(autoincrement())
   name  String @unique
   posts Post[]
+}
+
+enum Role {
+  USER
+  ADMIN
 }

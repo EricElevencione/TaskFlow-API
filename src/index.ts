@@ -288,28 +288,14 @@ app.get("/posts", authMiddleware, async (req, res) => {
   const tag = req.query.tag;
   const allowedSortFields = ["title", "createdAt"];
   const allowedOrderFields = ["asc", "desc"];
-  // Set the default sorting to newest posts first, while allowing orderBy to use any valid Post sorting field
+  // Default to newest posts first
   let orderBy: Prisma.PostOrderByWithRelationInput = {
     createdAt: "desc",
   };
 
-  // Not optimal path if tag is undefined
-  // if (tag === undefined) {
-  //   return;
-  // }
-
-  // If tag is declared find the individual tag (more like validation)
+  // If tag is provided, make sure it is a string
   if (tag !== undefined && typeof tag !== "string") {
     return res.status(400).send("Tag must be a string");
-  } else if (typeof tag === "string") {
-    const existingTag = await prisma.tag.findUnique({
-      where: {
-        name: tag,
-      },
-    });
-    if (existingTag === null) {
-      return res.status(400).send("Tag not found");
-    }
   }
 
   if (
@@ -331,7 +317,7 @@ app.get("/posts", authMiddleware, async (req, res) => {
     }
   }
 
-  // // Currently have no filters
+  // Currently have no filters
   let where: Prisma.PostWhereInput = {};
 
   // // Validation and put some in where variable
@@ -345,21 +331,12 @@ app.get("/posts", authMiddleware, async (req, res) => {
     };
   }
 
-  // Put into default if not "sortBy" or "order" with "where" is default if user doesn't provide
+  // Apply the tag filter only when a tag is provided
   const posts = await prisma.post.findMany({
     skip: skip,
     take: limit,
     orderBy,
     where,
-
-    // Errors because the some or tag is will be undefined if the user puts this "GET /posts"
-    // where: {
-    //   tags: {
-    //     some: {
-    //       name: tag,
-    //     },
-    //   },
-    // },
   });
   res.send(posts);
 });
@@ -458,6 +435,48 @@ app.post("/posts/:postId/comments", authMiddleware, async (req, res) => {
       });
       res.send(comments);
     }
+
+    await prisma.$transaction([]);
+  }
+});
+
+app.delete("/posts/:postId", authMiddleware, async (req, res) => {
+  const postId = Number(req.params.postId);
+
+  if (Number.isNaN(postId)) {
+    return res.status(400).send("postId must be a number");
+  } else {
+    const post = await prisma.post.findUnique({
+      where: {
+        id: postId,
+      },
+    });
+
+    if (post === null) {
+      return res.status(404).send("postId not found");
+    } else if (post.authorId !== req.userId) {
+      return res
+        .status(404)
+        .send("Request postId doesn't match any postId database");
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const deletedComments = await tx.comment.deleteMany({
+        where: {
+          postId: postId,
+        },
+      });
+      const deletedPost = await tx.post.delete({
+        where: {
+          id: postId,
+        },
+      });
+      return {
+        deletedPost,
+        deletedComments,
+      };
+    });
+    res.send(result);
   }
 });
 
