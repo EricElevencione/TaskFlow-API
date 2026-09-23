@@ -28,8 +28,8 @@ model User {
   role         Role     @default(USER)
   createdAt DateTime @default(now())
   tasks Task[]
-  post Post[]
-  comment Comment[]
+  posts Post[]
+  comments Comment[]
 }
 
 model Post {
@@ -39,7 +39,7 @@ model Post {
   authorId  Int
   createdAt DateTime @default(now())
   author User @relation(fields: [authorId], references: [id])
-  comment Comment[]
+  comments Comment[]
   tags      Tag[]  
 }
 

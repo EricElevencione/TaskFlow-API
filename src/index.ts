@@ -5,7 +5,7 @@ import * as z from "zod";
 import bcrypt from "bcrypt";
 import "dotenv/config";
 import jwt from "jsonwebtoken";
-import { Prisma } from "./generated/prisma/client.js";
+import { Prisma, Role } from "./generated/prisma/client.js";
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -44,6 +44,42 @@ const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
   } catch (error) {
     return res.status(401).send("Invalid token");
   }
+};
+
+const postAuthorizationMiddleware = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  const postId = Number(req.params.postId);
+
+  if (Number.isNaN(postId)) {
+    return res.status(400).send("postId must be a number");
+  }
+
+  const post = await prisma.post.findUnique({
+    where: {
+      id: postId,
+    },
+  });
+
+  if (post === null) {
+    return res.status(404).send("postId not found");
+  }
+
+  if (post.authorId !== req.userId) {
+    const requester = await prisma.user.findUnique({
+      where: {
+        id: req.userId,
+      },
+    });
+
+    if (requester?.role !== "ADMIN") {
+      return res.status(403).send("Forbidden");
+    }
+  }
+
+  next();
 };
 
 // Zod validation for incoming data
@@ -139,7 +175,7 @@ app.post("/auth/login", async (req, res) => {
     const { passwordHash, ...safeUser } = findUser;
     // I can use the String(findUser.id) but not recommended
     const accessToken = jwt.sign({ userId: findUser.id }, jwtSecret, {
-      expiresIn: "1h",
+      expiresIn: "3h",
     });
     // Send user + access token in one response to avoid "Cannot set headers after they are sent"
     res.json({
@@ -440,25 +476,12 @@ app.post("/posts/:postId/comments", authMiddleware, async (req, res) => {
   }
 });
 
-app.delete("/posts/:postId", authMiddleware, async (req, res) => {
-  const postId = Number(req.params.postId);
-
-  if (Number.isNaN(postId)) {
-    return res.status(400).send("postId must be a number");
-  } else {
-    const post = await prisma.post.findUnique({
-      where: {
-        id: postId,
-      },
-    });
-
-    if (post === null) {
-      return res.status(404).send("postId not found");
-    } else if (post.authorId !== req.userId) {
-      return res
-        .status(404)
-        .send("Request postId doesn't match any postId database");
-    }
+app.delete(
+  "/posts/:postId",
+  authMiddleware,
+  postAuthorizationMiddleware,
+  async (req, res) => {
+    const postId = Number(req.params.postId);
 
     const result = await prisma.$transaction(async (tx) => {
       const deletedComments = await tx.comment.deleteMany({
@@ -477,8 +500,8 @@ app.delete("/posts/:postId", authMiddleware, async (req, res) => {
       };
     });
     res.send(result);
-  }
-});
+  },
+);
 
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   res.status(500).send(err.message);
